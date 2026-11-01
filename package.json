@@ -23,7 +23,7 @@
     "notion:sync": "pnpm --filter @personal-desk/integrations notion"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "0.3.14",
+    "@electric-sql/pglite": "0.5.13",
     "@playwright/test": "^1.56.0",
     "@testing-library/jest-dom": "6.9.1",
     "@testing-library/react": "^16.3.0",
