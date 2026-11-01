@@ -1,0 +1,17 @@
+node_modules/
+.next/
+dist/
+coverage/
+.env
+.env.local
+.env.*
+!.env.example
+notion.mapping.json
+*.dump
+*.backup
+*.tsbuildinfo
+next-env.d.ts
+.pnpm-store/
+test-results/
+playwright-report/
+.local/

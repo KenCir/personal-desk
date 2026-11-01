@@ -1,0 +1,22 @@
+{
+  "name": "@personal-desk/integrations",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "notion": "tsx src/notion/cli.ts"
+  },
+  "dependencies": {
+    "@personal-desk/core": "workspace:*",
+    "@personal-desk/database": "workspace:*",
+    "@js-temporal/polyfill": "^0.5.1",
+    "dotenv": "^17.2.3",
+    "drizzle-orm": "^0.44.7",
+    "uuid": "^13.0.0"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "0.3.14",
+    "tsx": "^4.20.0"
+  }
+}

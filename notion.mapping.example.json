@@ -1,0 +1,28 @@
+{
+  "areas": { "name": { "property": "Name", "type": "title" } },
+  "projects": {
+    "name": { "property": "Name", "type": "title" },
+    "status": { "property": "Status", "type": "status" },
+    "area": { "property": "Area", "type": "relation" },
+    "description": null,
+    "deadline": { "property": "Deadline", "type": "date" },
+    "github": { "property": "GitHub", "type": "url" }
+  },
+  "tasks": {
+    "title": { "property": "Task", "type": "title" },
+    "status": { "property": "Status", "type": "status" },
+    "project": { "property": "Project", "type": "relation" },
+    "due": { "property": "Due", "type": "date" },
+    "priority": { "property": "Priority", "type": "select" },
+    "type": { "property": "Type", "type": "select" }
+  },
+  "projectStatuses": {
+    "Planning": "planning",
+    "Active": "active",
+    "Waiting": "waiting",
+    "Paused": "blocked",
+    "Done": "done"
+  },
+  "taskStatuses": { "Todo": "todo", "Doing": "in_progress", "Waiting": "waiting", "Done": "done" },
+  "taskPriorities": { "Low": "low", "Medium": "medium", "High": "high", "Urgent": "urgent" }
+}

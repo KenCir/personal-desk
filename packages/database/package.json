@@ -1,0 +1,27 @@
+{
+  "name": "@personal-desk/database",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./schema": "./src/schema.ts",
+    "./queries": "./src/queries.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "generate": "drizzle-kit generate",
+    "migrate": "drizzle-kit migrate",
+    "smoke": "tsx src/smoke.ts"
+  },
+  "dependencies": {
+    "@personal-desk/core": "workspace:*",
+    "drizzle-orm": "^0.44.7",
+    "postgres": "^3.4.7"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.0",
+    "drizzle-kit": "^0.31.5",
+    "dotenv": "^17.2.3"
+  }
+}
