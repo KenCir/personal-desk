@@ -11,7 +11,7 @@
     "@personal-desk/core": "workspace:*",
     "@personal-desk/database": "workspace:*",
     "@js-temporal/polyfill": "^0.5.1",
-    "dotenv": "^17.4.2",
+    "dotenv": "^18.0.9",
     "drizzle-orm": "^0.45.4",
     "uuid": "^13.0.2"
   },
