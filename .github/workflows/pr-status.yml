@@ -1,0 +1,84 @@
+name: Pull request status
+
+on:
+  # This job only uses the event payload and the GitHub API. Never check out the
+  # pull request head here because pull_request_target has a write token.
+  pull_request_target:
+    types:
+      - opened
+      - closed
+      - reopened
+      - review_requested
+  pull_request_review:
+    types:
+      - submitted
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: pr-status-${{ github.repository }}-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  update-status:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Update pull request status labels
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const labels = {
+              inProgress: 'PR: In Progress',
+              review: 'PR: Review',
+              ready: 'PR: Ready',
+              changesRequested: 'PR: Changes Requested',
+              blocked: 'PR: Blocked',
+              merged: 'PR: Merged',
+              draft: 'PR: Draft',
+            };
+            const statusLabels = new Set(Object.values(labels));
+
+            const pullRequest = context.payload.pull_request;
+            const currentLabels = new Set(
+              pullRequest.labels.map((label) => typeof label === 'string' ? label : label.name),
+            );
+            let nextLabel;
+
+            if (context.eventName === 'pull_request_review') {
+              const reviewState = context.payload.review.state.toLowerCase();
+              if (reviewState === 'approved') nextLabel = labels.ready;
+              if (reviewState === 'changes_requested') nextLabel = labels.changesRequested;
+            } else {
+              switch (context.payload.action) {
+                case 'opened':
+                case 'reopened':
+                  nextLabel = labels.inProgress;
+                  break;
+                case 'review_requested':
+                  nextLabel = labels.review;
+                  break;
+                case 'closed':
+                  nextLabel = pullRequest.merged ? labels.merged : labels.blocked;
+                  break;
+              }
+            }
+
+            if (!nextLabel) return;
+
+            for (const name of statusLabels) {
+              if (!currentLabels.has(name)) continue;
+              await github.rest.issues.removeLabel({
+                ...context.repo,
+                issue_number: pullRequest.number,
+                name,
+              });
+            }
+
+            await github.rest.issues.addLabels({
+              ...context.repo,
+              issue_number: pullRequest.number,
+              labels: [nextLabel],
+            });

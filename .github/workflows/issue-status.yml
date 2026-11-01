@@ -1,0 +1,91 @@
+name: Issue status
+
+on:
+  issues:
+    types:
+      - opened
+      - closed
+      - reopened
+      - assigned
+      - unassigned
+
+permissions:
+  issues: write
+
+concurrency:
+  group: issue-status-${{ github.repository }}-${{ github.event.issue.number }}
+  cancel-in-progress: true
+
+jobs:
+  update-status:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Update issue status labels
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const labels = {
+              todo: 'Status: Todo',
+              inProgress: 'Status: In Progress',
+              completed: 'Status: Completed',
+              blocked: 'Status: Blocked',
+              invalid: 'Status: Inactive(Invalid)',
+              duplicate: 'Status: Inactive(Duplicate)',
+              abandoned: 'Status: Inactive(Abandoned)',
+            };
+
+            const { action, issue } = context.payload;
+            const currentLabels = new Set(
+              issue.labels.map((label) => typeof label === 'string' ? label : label.name),
+            );
+            const add = [];
+            const remove = [];
+
+            switch (action) {
+              case 'opened':
+                if (!issue.assignee) add.push(labels.todo);
+                break;
+              case 'assigned':
+                if (issue.state === 'closed') return;
+                add.push(labels.inProgress);
+                remove.push(labels.todo, labels.blocked);
+                break;
+              case 'unassigned':
+                if (issue.state === 'closed') return;
+                add.push(labels.todo);
+                remove.push(labels.inProgress);
+                break;
+              case 'reopened':
+                add.push(issue.assignee ? labels.inProgress : labels.todo);
+                remove.push(labels.completed, labels.invalid, labels.duplicate, labels.abandoned);
+                break;
+              case 'closed':
+                if (issue.state_reason === 'not_planned') {
+                  add.push(labels.abandoned);
+                } else if (issue.state_reason === 'duplicate') {
+                  add.push(labels.duplicate);
+                } else {
+                  add.push(labels.completed);
+                }
+                remove.push(labels.todo, labels.inProgress, labels.blocked);
+                break;
+              default:
+                return;
+            }
+
+            if (add.length > 0) {
+              await github.rest.issues.addLabels({
+                ...context.repo,
+                issue_number: issue.number,
+                labels: add,
+              });
+            }
+
+            for (const name of remove) {
+              if (!currentLabels.has(name)) continue;
+              await github.rest.issues.removeLabel({
+                ...context.repo,
+                issue_number: issue.number,
+                name,
+              });
+            }
