@@ -17,7 +17,7 @@
   "dependencies": {
     "@personal-desk/core": "workspace:*",
     "drizzle-orm": "^0.45.4",
-    "postgres": "^3.4.9"
+    "postgres": "^4.0.0"
   },
   "devDependencies": {
     "tsx": "^4.23.15",
