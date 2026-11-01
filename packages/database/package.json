@@ -16,12 +16,12 @@
   },
   "dependencies": {
     "@personal-desk/core": "workspace:*",
-    "drizzle-orm": "^0.45.0",
-    "postgres": "^3.4.7"
+    "drizzle-orm": "^0.45.4",
+    "postgres": "^3.4.9"
   },
   "devDependencies": {
-    "tsx": "^4.20.0",
-    "drizzle-kit": "^0.31.5",
-    "dotenv": "^17.2.3"
+    "tsx": "^4.23.15",
+    "drizzle-kit": "^0.31.11",
+    "dotenv": "^17.4.2"
   }
 }
