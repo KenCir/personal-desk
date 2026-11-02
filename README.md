@@ -37,7 +37,7 @@ Projectの例: `/projects/personal-desk`。外部リンクは公開サービス�
 
 ## 開発用PostgreSQL
 
-Docker Composeが利用できる環境で実行してください。
+開発・CIの標準はPostgreSQL 18（`postgres:18-alpine`）です。Docker Composeが利用できる環境で実行してください。既存17系のデータが必要な場合は、起動前に下記の移行手順を確認してください。
 
 ```sh
 # 初回のみ .env.example を .env にコピーし、必要なら接続情報を変更
@@ -45,7 +45,22 @@ docker compose up -d postgres
 pnpm db:migrate
 ```
 
-初期値はlocalhost:5432 / database・user・passwordともに`personal_desk`です。ポートはloopbackにのみ公開します。データは`postgres_data` volumeに保存します。
+初期値はlocalhost:5432 / database・user・passwordともに`personal_desk`です。ポートはloopbackにのみ公開します。18用の新規`postgres18_data` Volumeを`/var/lib/postgresql`へMountし、公式Imageの既定`PGDATA=/var/lib/postgresql/18/docker`を使用します（[公式仕様](https://hub.docker.com/_/postgres)）。`.env`の`DATABASE_URL`がこのローカルDBを指していることを確認してからMigrationを実行してください。
+
+### 既存PostgreSQL 17 Volumeの保護と移行
+
+旧`postgres_data`（通常は`<Compose Project>_postgres_data`）は削除・初期化・18への接続を行いません。18用Volumeは別名なので、起動しても旧データは自動移行されず、空DBから開始します。`docker compose down -v`やVolumeの削除・pruneを移行手段として使わないでください。
+
+既存データが必要な場合は、以下を別途計画して実施してください。今回の構成変更ではデータ移行を自動実行しません。
+
+1. 旧ContainerのImage・Mount・Compose Project名を確認し、旧Volume名を記録します。Dockerを利用できない環境ではVolumeの存在・内容は未確認です。
+2. 旧17サーバーを使用し、書き込みを止めた整合性のある状態で論理バックアップ（`pg_dump`と必要なRoleの`pg_dumpall --globals-only`）を取得し、復元可能性を確認します。18 Imageで旧Volumeを起動しないでください。
+3. 別Project・別Volume・別ポートで18を起動し、バックアップを復元します。Roleや所有者の扱いを確認し、復元先に対してのみ未適用Drizzle Migrationを適用します。既存Migrationの履歴は維持します。
+4. 件数・制約・Enum・日時・Read Queryを比較してから接続先を切り替えます。旧Volumeとバックアップは保持します。
+
+[PostgreSQL公式のMajor Upgrade手順](https://www.postgresql.org/docs/18/upgrading.html)ではdump/restoreや`pg_upgrade`が必要です。単なるImage交換・ディレクトリ移動では17のデータを18に変換できません。`pg_upgrade`は旧新Binaryと事前検査が必要な別作業として扱い、元Volumeを共有するlink方式による自動Upgradeは行いません。外部Raspberry Piの既存PostgreSQL 18は、このCompose・移行手順の操作対象外です。
+
+Renovateは既存のDocker datasourceルールでComposeとCIのImageを追跡します。`18-alpine`は18系の更新を受け取るTagです。将来のMajor更新PRではVolume・データ移行を再確認し、Tagだけを変更して既存Volumeを流用しないでください。
 
 Schema変更時:
 
@@ -138,6 +153,7 @@ pnpm format:check
 - `pnpm test:e2e:database`: Migration適用済みの空Databaseを`DATABASE_URL`（またはルート`.env`）に指定した場合のみ実行します。port 43101で空画面、port 43102で接続失敗時のError/503を確認します。既存データの削除、Seed、Migrationは行いません。
 - E2Eの画面キャプチャは`test-results/`へ保存します（Git対象外）。
 - Dockerの実起動は別の検証です。PGliteの成功はDocker Compose上のPostgreSQL接続成功を保証しません。
+- CIでは独立したPostgreSQL 18 Serviceの`personal_desk_ci`へDrizzle Kit Migrationを適用し、`POSTGRES_TEST_URL`を明示した`packages/database/src/postgres.test.ts`でVersion・13テーブル・Foreign Key・Index・Enum・`timestamptz`・Read Queryを検証します。FixtureはTransactionをロールバックし、その後Read Smokeと空DBのDatabase E2Eを実行します。通常の`pnpm test`はこの実DBテストをSkipし、個人用`.env`には接続しません。
 
 ## 表示状態の確認
 

@@ -74,7 +74,7 @@ jobs:
     timeout-minutes: 25
     services:
       postgres:
-        image: postgres:17-alpine
+        image: postgres:18-alpine
         env:
           POSTGRES_USER: ci
           POSTGRES_PASSWORD: ci-only-password
@@ -111,6 +111,12 @@ jobs:
         run: pnpm test:e2e
       - name: Migrate the disposable CI database
         run: pnpm db:migrate
+      - name: PostgreSQL 18 schema and read query checks
+        run: |
+          pnpm exec vitest run packages/database/src/postgres.test.ts
+          pnpm db:smoke
+        env:
+          POSTGRES_TEST_URL: postgresql://ci:ci-only-password@127.0.0.1:5432/personal_desk_ci
       - name: Database E2E (empty and unavailable database)
         run: pnpm test:e2e:database
       - name: Upload browser failure evidence
