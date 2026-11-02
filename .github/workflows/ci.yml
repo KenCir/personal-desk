@@ -1,0 +1,120 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  CI: 'true'
+  DATA_SOURCE: mock
+  NEXT_TELEMETRY_DISABLED: '1'
+
+jobs:
+  checks:
+    name: Checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: '24.22.2'
+          package-manager-cache: false
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+        with:
+          # Read packageManager from package.json, including on Renovate PRs.
+          run_install: false
+          cache: true
+      - name: Frozen install and peer dependency checks
+        run: pnpm install --frozen-lockfile --strict-peer-dependencies
+      - name: Lint
+        run: pnpm lint
+      - name: Type check
+        run: pnpm typecheck
+      - name: Format check
+        run: |
+          pnpm format:check
+          pnpm exec prettier --check .github/workflows/ci.yml .github/security-audit-baseline.json scripts/ci
+      - name: Unit and integration tests (fixtures only)
+        run: pnpm test
+      - name: Audit policy tests
+        run: node --test scripts/ci/audit.test.mjs
+      - name: Production build
+        run: pnpm build
+      - name: Security audit against reviewed baseline
+        if: ${{ !cancelled() }}
+        run: node scripts/ci/audit.mjs
+      - name: Upload audit report
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: security-audit
+          path: test-results/security-audit.json
+          if-no-files-found: warn
+          retention-days: 14
+
+  e2e:
+    name: E2E
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: ci
+          POSTGRES_PASSWORD: ci-only-password
+          POSTGRES_DB: personal_desk_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci -d personal_desk_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # Disposable service container credentials, never repository secrets.
+      DATABASE_URL: postgresql://ci:ci-only-password@127.0.0.1:5432/personal_desk_ci
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: '24.22.2'
+          package-manager-cache: false
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v4.4.0
+        with:
+          run_install: false
+          cache: true
+      - name: Frozen install and peer dependency checks
+        run: pnpm install --frozen-lockfile --strict-peer-dependencies
+      - name: Install Chrome and system dependencies
+        run: pnpm exec playwright install --with-deps chrome
+      - name: Production build
+        run: pnpm build
+      - name: Mock E2E
+        run: pnpm test:e2e
+      - name: Migrate the disposable CI database
+        run: pnpm db:migrate
+      - name: Database E2E (empty and unavailable database)
+        run: pnpm test:e2e:database
+      - name: Upload browser failure evidence
+        if: ${{ failure() }}
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: playwright-failures
+          path: test-results/
+          if-no-files-found: ignore
+          retention-days: 7

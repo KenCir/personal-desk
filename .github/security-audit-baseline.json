@@ -1,0 +1,87 @@
+{
+  "schemaVersion": 1,
+  "reviewedAt": "2026-11-02",
+  "sourceCommit": "c5d35de22eb2f998b499903c8619828c1c7f0793",
+  "advisories": [
+    {
+      "id": "GHSA-67mh-4wv8-2f99",
+      "package": "esbuild",
+      "severity": "moderate",
+      "versions": ["0.18.20"],
+      "devOnly": true,
+      "reason": "Drizzle-kit loader uses transforms, not esbuild serve. No Next production path.",
+      "remediation": "Replace/update legacy drizzle-kit loader through an upstream-compatible change; do not override esbuild major API blindly.",
+      "url": "https://github.com/advisories/GHSA-67mh-4wv8-2f99"
+    },
+    {
+      "id": "GHSA-698v-4r3x-3vcv",
+      "package": "vite",
+      "severity": "moderate",
+      "versions": ["7.3.6"],
+      "devOnly": true,
+      "reason": "Vitest tooling only. Current vitest run uses no exposed Vite dev/UI server; no Next production path. Do not expose tooling server before patching.",
+      "remediation": "Target Vite 7.3.7+ in a separate scoped security update, then test. No rollback to vulnerable older Vitest.",
+      "url": "https://github.com/advisories/GHSA-698v-4r3x-3vcv"
+    },
+    {
+      "id": "GHSA-r825-w8mm-5pxw",
+      "package": "vite",
+      "severity": "moderate",
+      "versions": ["7.3.6"],
+      "devOnly": true,
+      "reason": "Vitest tooling only. Current vitest run uses no exposed Vite dev/UI server; no Next production path. Do not expose tooling server before patching.",
+      "remediation": "Target Vite 7.3.7+ in a separate scoped security update, then test. No rollback to vulnerable older Vitest.",
+      "url": "https://github.com/advisories/GHSA-r825-w8mm-5pxw"
+    },
+    {
+      "id": "GHSA-587h-7wmj-h5pm",
+      "package": "vite",
+      "severity": "high",
+      "versions": ["7.3.6"],
+      "devOnly": true,
+      "reason": "Vitest tooling only. Current vitest run uses no exposed Vite dev/UI server; no Next production path. Do not expose tooling server before patching.",
+      "remediation": "Target Vite 7.3.7+ in a separate scoped security update, then test. No rollback to vulnerable older Vitest.",
+      "url": "https://github.com/advisories/GHSA-587h-7wmj-h5pm"
+    },
+    {
+      "id": "GHSA-9jrq-w75r-8gcw",
+      "package": "vite",
+      "severity": "low",
+      "versions": ["7.3.6"],
+      "devOnly": true,
+      "reason": "Vitest tooling only. Current vitest run uses no exposed Vite dev/UI server; no Next production path. Do not expose tooling server before patching.",
+      "remediation": "Target Vite 7.3.7+ in a separate scoped security update, then test. No rollback to vulnerable older Vitest.",
+      "url": "https://github.com/advisories/GHSA-9jrq-w75r-8gcw"
+    },
+    {
+      "id": "GHSA-rq7h-c2jc-7f22",
+      "package": "vite",
+      "severity": "moderate",
+      "versions": ["7.3.6"],
+      "devOnly": true,
+      "reason": "Vitest tooling only. Current vitest run uses no exposed Vite dev/UI server; no Next production path. Do not expose tooling server before patching.",
+      "remediation": "Target Vite 7.3.7+ in a separate scoped security update, then test. No rollback to vulnerable older Vitest.",
+      "url": "https://github.com/advisories/GHSA-rq7h-c2jc-7f22"
+    },
+    {
+      "id": "GHSA-mrhx-c7xc-m3w5",
+      "package": "zod",
+      "severity": "high",
+      "versions": ["4.6.5"],
+      "devOnly": true,
+      "reason": "ESLint hooks configuration validation; no runtime import accepting public input.",
+      "remediation": "Target compatible Zod 4.6.6+ in a scoped tooling update.",
+      "url": "https://github.com/advisories/GHSA-mrhx-c7xc-m3w5"
+    },
+    {
+      "id": "GHSA-g3hv-75wg-m249",
+      "package": "minimatch",
+      "severity": "moderate",
+      "versions": ["10.2.6", "3.1.5"],
+      "devOnly": true,
+      "reason": "ESLint glob/config parsing; no runtime user-supplied glob path.",
+      "remediation": "Patched range starts at 11.0.1; major replacement of old ESLint consumers needs compatibility review, do not force override blindly.",
+      "url": "https://github.com/advisories/GHSA-g3hv-75wg-m249"
+    }
+  ]
+}
