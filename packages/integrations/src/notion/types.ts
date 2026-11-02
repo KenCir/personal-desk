@@ -4,14 +4,7 @@ export const sourceKinds = ['areas', 'projects', 'tasks'] as const;
 export type SourceKind = (typeof sourceKinds)[number];
 export type SourceIds = Record<SourceKind, string>;
 export type PropertyType =
-  | 'title'
-  | 'rich_text'
-  | 'status'
-  | 'select'
-  | 'multi_select'
-  | 'relation'
-  | 'date'
-  | 'url';
+  'title' | 'rich_text' | 'status' | 'select' | 'multi_select' | 'relation' | 'date' | 'url';
 export interface PropertyMapping {
   property: string;
   type: PropertyType;
