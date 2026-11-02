@@ -39,6 +39,9 @@ jobs:
           cache: true
       - name: Frozen install and peer dependency checks
         run: pnpm install --frozen-lockfile --strict-peer-dependencies
+      - name: Validate locked peer constraints without writing files
+        # Frozen install can skip resolution for an already-consistent lockfile.
+        run: pnpm install --dry-run --no-frozen-lockfile --no-prefer-frozen-lockfile --strict-peer-dependencies
       - name: Lint
         run: pnpm lint
       - name: Type check

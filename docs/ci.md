@@ -6,7 +6,7 @@
 
 Configure branch protection to require **Checks** and **E2E** after the first successful run. Both jobs are independent and have time limits. A newer run for the same PR/ref cancels the older run; feature-branch pushes do not duplicate PR runs.
 
-- **Checks**: frozen install with strict peers, lint, typecheck, formatting, the existing 83 unit/integration tests (including Notion API fixtures and PGlite), audit-policy tests, production build, and security audit.
+- **Checks**: frozen install, a non-writing dependency-resolution dry run with strict peers, lint, typecheck, formatting, the existing 83 unit/integration tests (including Notion API fixtures and PGlite), audit-policy tests, production build, and security audit. Frozen install alone can skip peer resolution when the lockfile is consistent; the dry run catches conflicts already recorded in that lockfile. It does not update dependencies or save a lockfile.
 - **E2E**: frozen install with strict peers, Chrome installation, production build, Mock E2E, migrations into a fresh PostgreSQL 17 service container, then empty/error Database E2E. This container is destroyed with the runner. Its credentials are public test values, not personal database credentials. No Notion API connection is needed.
 
 Node is pinned to **24.22.2**. pnpm is read from `package.json#packageManager` (currently **12.16.1**) so a Renovate package-manager update tests the proposed version. The root `engines >=22.12` is broader than jsdom 30's supported versions; CI intentionally uses the verified Node version. The dependency store is cached by the pnpm setup action and lockfile; every job still performs a frozen install. `node_modules` and build outputs are not restored from cache.
