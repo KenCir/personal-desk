@@ -114,6 +114,7 @@ jobs:
       - name: PostgreSQL 18 schema and read query checks
         run: |
           pnpm exec vitest run packages/database/src/postgres.test.ts
+          pnpm exec vitest run packages/integrations/src/notion/postgres.test.ts
           pnpm db:smoke
         env:
           POSTGRES_TEST_URL: postgresql://ci:ci-only-password@127.0.0.1:5432/personal_desk_ci

@@ -1,12 +1,20 @@
 import { and, eq, isNull, sql } from 'drizzle-orm';
 import type { PgDatabase, PgQueryResultHKT, PgTransactionConfig } from 'drizzle-orm/pg-core';
 import { v7 as uuidv7 } from 'uuid';
-import { createHash } from 'node:crypto';
 import { readMigrationFiles } from 'drizzle-orm/migrator';
 import { fileURLToPath } from 'node:url';
 import * as s from '@personal-desk/database/schema';
-import { NotionSyncError, type NormalizedBatch, type SourceIds } from './types';
+import {
+  NotionSyncError,
+  sourceKinds,
+  type NormalizedBatch,
+  type SourceIds,
+  type SyncMode,
+} from './types';
 import { planSync, type Plan, type Snapshot } from './plan';
+import { activityPlan } from './activity';
+import { reconciliationPlan } from './reconcile';
+import { findIntegration, integrationName, readState, saveState } from './state';
 
 export type WriteTransaction = Pick<
   PgDatabase<PgQueryResultHKT, typeof s>,
@@ -17,6 +25,12 @@ export interface SyncDatabase extends WriteTransaction {
     callback: (tx: WriteTransaction) => Promise<T>,
     config?: PgTransactionConfig,
   ): Promise<T>;
+}
+export type LockGuard = (tx?: WriteTransaction) => Promise<void>;
+export interface ApplyOptions {
+  fingerprint?: string;
+  mode?: SyncMode;
+  assertHeld?: LockGuard;
 }
 function rows(result: unknown): Record<string, unknown>[] {
   if (Array.isArray(result)) return result;
@@ -84,11 +98,40 @@ async function lock(tx: WriteTransaction) {
   )[0]?.acquired;
   if (acquired !== true) throw new NotionSyncError('notion_sync_busy');
 }
-export async function previewPlan(db: SyncDatabase, batch: NormalizedBatch, now: string) {
-  return db.transaction(async (tx) => planSync(batch, await readSnapshot(tx), now), {
-    accessMode: 'read only',
-    isolationLevel: 'repeatable read',
-  });
+export async function previewPlan(
+  db: SyncDatabase,
+  batch: NormalizedBatch,
+  now: string,
+  ids?: SourceIds,
+  options: ApplyOptions = {},
+) {
+  return db.transaction(
+    async (tx) => {
+      const snapshot = await readSnapshot(tx);
+      const plan = planSync(batch, snapshot, now);
+      const integration = ids ? await findIntegration(tx, ids) : undefined;
+      const { state } = await readState(tx, integration?.id, options.fingerprint ?? '');
+      const activities = activityPlan(plan, snapshot, state, integration?.id ?? 'preview');
+      const reconciliation = reconciliationPlan(
+        batch,
+        snapshot,
+        plan,
+        state,
+        options.mode ?? 'full',
+      );
+      plan.warnings.push(...reconciliation.warnings);
+      return {
+        ...plan,
+        activities,
+        deletions: reconciliation.deletions,
+        baselineEstablished: !!state.baselineAt,
+      };
+    },
+    {
+      accessMode: 'read only',
+      isolationLevel: 'repeatable read',
+    },
+  );
 }
 export async function applyPlan(tx: WriteTransaction, plan: Plan) {
   // Every write is constrained by provider/external_id uniqueness and the planned stable ID.
@@ -196,18 +239,20 @@ export async function applyPlan(tx: WriteTransaction, plan: Plan) {
     if (result[0]?.id !== id) throw new NotionSyncError('concurrent_entity_change');
   }
 }
-export async function startRun(db: SyncDatabase, ids: SourceIds, startedAt: string) {
+export async function startRun(
+  db: SyncDatabase,
+  ids: SourceIds,
+  startedAt: string,
+  options: ApplyOptions & { trigger?: 'manual' | 'worker' } = {},
+) {
   return db.transaction(async (tx) => {
+    await options.assertHeld?.(tx);
     await lock(tx);
-    const scope = createHash('sha256').update(JSON.stringify(ids)).digest('hex').slice(0, 20);
-    const name = `Notion initial sync (${scope})`;
-    const matches = await tx
-      .select()
-      .from(s.integrations)
-      .where(and(eq(s.integrations.provider, 'notion'), eq(s.integrations.name, name)));
-    if (matches.length > 1) throw new NotionSyncError('ambiguous_integration');
-    const integrationId = matches[0]?.id ?? uuidv7();
-    if (!matches.length)
+    const name = integrationName(ids);
+    const existing = await findIntegration(tx, ids);
+    if (existing && !existing.enabled) throw new NotionSyncError('notion_integration_disabled');
+    const integrationId = existing?.id ?? uuidv7();
+    if (!existing)
       await tx.insert(s.integrations).values({
         id: integrationId,
         provider: 'notion',
@@ -221,29 +266,103 @@ export async function startRun(db: SyncDatabase, ids: SourceIds, startedAt: stri
         .update(s.integrations)
         .set({ lastAttemptAt: startedAt, updatedAt: startedAt })
         .where(eq(s.integrations.id, integrationId));
+    // Only a caller holding the run-wide session lock may recover interrupted runs.
+    if (options.assertHeld)
+      await tx
+        .update(s.syncRuns)
+        .set({
+          status: 'failed',
+          finishedAt: startedAt,
+          error: 'interrupted_sync',
+        })
+        .where(and(eq(s.syncRuns.integrationId, integrationId), eq(s.syncRuns.status, 'running')));
     const runId = uuidv7();
     await tx.insert(s.syncRuns).values({
       id: runId,
       integrationId,
-      type: 'notion.manual.initial',
+      type: `notion.${options.trigger ?? 'manual'}.${options.mode ?? 'full'}`,
       status: 'running',
       startedAt,
       metadata: { sources: ids },
     });
-    return { integrationId, runId };
+    return { integrationId, runId, startedAt, ids };
   });
 }
 export type Run = Awaited<ReturnType<typeof startRun>>;
-export async function applyBatch(db: SyncDatabase, batch: NormalizedBatch, run: Run, now: string) {
+export async function applyBatch(
+  db: SyncDatabase,
+  batch: NormalizedBatch,
+  run: Run,
+  now: string,
+  options: ApplyOptions = {},
+) {
   return db.transaction(async (tx) => {
+    await options.assertHeld?.(tx);
     await lock(tx);
-    const plan = planSync(batch, await readSnapshot(tx), now);
+    const snapshot = await readSnapshot(tx);
+    const plan = planSync(batch, snapshot, now);
+    const { state, watermark } = await readState(tx, run.integrationId, options.fingerprint ?? '');
+    const activities = activityPlan(plan, snapshot, state, run.integrationId);
+    const { deletions, warnings } = reconciliationPlan(
+      batch,
+      snapshot,
+      plan,
+      state,
+      options.mode ?? 'full',
+    );
+    plan.warnings.push(...warnings);
     await applyPlan(tx, plan);
+    for (const deletion of deletions) {
+      const table = s[deletion.source];
+      await tx
+        .update(table)
+        .set({
+          deletedAt: now,
+          updatedAt: now,
+          syncedAt: now,
+          sourceUpdatedAt: deletion.sourceUpdatedAt,
+        })
+        .where(
+          and(eq(table.id, deletion.id), eq(table.provider, 'notion'), isNull(table.deletedAt)),
+        );
+    }
+    let activitiesCreated = 0;
+    for (const activity of activities) {
+      const inserted = await tx
+        .insert(s.activities)
+        .values(activity)
+        .onConflictDoNothing({ target: s.activities.dedupKey })
+        .returning({ id: s.activities.id });
+      activitiesCreated += inserted.length;
+    }
     const created = Object.values(plan.counts).reduce((sum, count) => sum + count.created, 0);
     const updated = Object.values(plan.counts).reduce((sum, count) => sum + count.updated, 0);
-    const accepted = plan.areas.length + plan.projects.length + plan.tasks.length;
+    const accepted =
+      plan.areas.length + plan.projects.length + plan.tasks.length + deletions.length;
     const status = plan.issues.length ? (accepted ? 'partial' : 'failed') : 'success';
     const error = plan.issues.length ? JSON.stringify(plan.issues.slice(0, 100)) : null;
+    const nextState = structuredClone(state);
+    nextState.revision++;
+    nextState.retryNotBefore = null;
+    for (const source of sourceKinds)
+      nextState.known[source] = [
+        ...new Set([
+          ...state.known[source],
+          ...plan[source].map((row) => row.values.externalId!),
+          ...deletions.filter((row) => row.source === source).map((row) => row.externalId),
+        ]),
+      ];
+    if (status === 'success' && (options.mode ?? 'full') === 'full') {
+      nextState.baselineAt ??= run.startedAt;
+      nextState.lastFullAt = run.startedAt;
+    }
+    await saveState(
+      tx,
+      run.integrationId,
+      nextState,
+      status === 'success' ? run.startedAt : watermark,
+      now,
+    );
     await tx
       .update(s.syncRuns)
       .set({
@@ -252,8 +371,12 @@ export async function applyBatch(db: SyncDatabase, batch: NormalizedBatch, run: 
         itemsFetched: Object.values(batch.fetched).reduce((a, b) => a + b, 0),
         itemsCreated: created,
         itemsUpdated: updated,
+        itemsDeleted: deletions.length,
         error,
         metadata: {
+          sources: run.ids,
+          activitiesCreated,
+          baselineEstablished: !!nextState.baselineAt,
           counts: plan.counts,
           issues: plan.issues.slice(0, 100),
           warnings: plan.warnings.slice(0, 100),
@@ -278,11 +401,34 @@ export async function applyBatch(db: SyncDatabase, batch: NormalizedBatch, run: 
           : { lastErrorAt: now, lastError: error }),
       })
       .where(eq(s.integrations.id, run.integrationId));
-    return { plan, status };
+    return {
+      plan,
+      status,
+      activitiesCreated,
+      deleted: deletions.length,
+      baselineEstablished: !!nextState.baselineAt,
+    };
   });
 }
-export async function failRun(db: SyncDatabase, run: Run, code: string, now: string, fetched = 0) {
+export async function failRun(
+  db: SyncDatabase,
+  run: Run,
+  code: string,
+  now: string,
+  fetched = 0,
+  options: ApplyOptions & { retryNotBefore?: string } = {},
+) {
   await db.transaction(async (tx) => {
+    await options.assertHeld?.(tx);
+    if (options.retryNotBefore) {
+      const { state, watermark } = await readState(
+        tx,
+        run.integrationId,
+        options.fingerprint ?? '',
+      );
+      state.retryNotBefore = options.retryNotBefore;
+      await saveState(tx, run.integrationId, state, watermark, now);
+    }
     await tx
       .update(s.syncRuns)
       .set({ status: 'failed', finishedAt: now, error: code, itemsFetched: fetched })

@@ -282,6 +282,8 @@ Soft Deleteを許可するのは原則として以下の場合。
 
 Failed / Partial Syncによって大量Soft Deleteを発生させない。
 
+Notion自動同期の初期版では、明示的なArchived / Trashの確認だけをSoft Delete対象とする。正常なFull Syncでも一覧からの消失だけでは削除せずWarningを記録する。共有権限変更との混同を避けるための限定であり、具体的なBaseline・排他・Activity規則は[Notion自動同期](notion-sync.md)を参照する。
+
 ---
 
 # 11. Activity生成

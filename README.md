@@ -4,7 +4,7 @@
 
 ## 起動
 
-Node.js 22.12以上（検証: 24.19.0）、pnpm 11.19.0を使用します。
+CIと同じNode.js 26.13.0、pnpm 12.16.1を使用します。依存関係は既存Lockfileに固定します。
 
 ```sh
 pnpm install --frozen-lockfile
@@ -90,9 +90,9 @@ DATABASE_URL=postgresql://USER:PASSWORD@127.0.0.1:5432/personal_desk
 pnpm db:smoke
 ```
 
-上記は実PostgreSQLの読み取り専用TransactionでRead Queryを確認します。本格的なSeedや継続同期はありません。Notionの手動初回同期は下記を参照してください。
+上記は実PostgreSQLの読み取り専用TransactionでRead Queryを確認します。Notionの手動同期と任意起動のWorkerは下記を参照してください。
 
-## Notionの手動初回同期
+## Notionの手動同期
 
 `packages/integrations/src/notion/`がNotionの読み取り、Schema検証、正規化、差分計算、PostgreSQLへの保存を担当します。既存のDatabaseDataSourceは変更しません。Notion REST APIは`2026-03-11`に固定し、Node.jsの`fetch`を使用します（Notion SDKは使用しません）。[APIバージョン](https://developers.notion.com/reference/versioning)と[Data Sourceの取得](https://developers.notion.com/reference/retrieve-a-data-source)に従います。
 
@@ -133,9 +133,37 @@ pnpm notion:sync
 
 `DATA_SOURCE=database`でWebを再起動すると、既存Dashboard／Projects／Project Detailから同期結果を閲覧できます。`pnpm test:e2e:database`は空DB専用テストのため、同期後の開発DBには使わず独立した空DBを指定してください。
 
-今回の範囲ではPolling、Webhook、Scheduler、Notionへの書き込み、自動Soft Delete、Activity自動生成は行いません。取得結果に現れないEntityは保持します。明示的にDeadlineが空になった場合は管理対象のSynthetic Milestoneだけをcancelled・期限なしへ変更します。GitHubが空になった場合は既存管理リンクを残してWarningを出します。無関係なResourceや手動Milestoneは変更しません。
+手動CLIとWorkerは同じCollector／Normalizer／WriterとProvider全体のSession Advisory Lockを使用します。API取得中はDB Transactionを保持せず、Lock接続喪失時は保存を中止します。明示的なArchived／TrashだけをSoft Deleteし、正常な全件取得でも一覧からの消失だけでは削除しません。既知の消失EntityはWarningで報告します。Notionへの書き込みとWebhookは実装していません。
+
+明示的にDeadlineが空になった場合は管理対象のSynthetic Milestoneだけをcancelled・期限なしへ変更します。GitHubが空になった場合は既存管理リンクを残してWarningを出します。ProjectのSoft DeleteによってTask／Milestone／Resourceを連鎖削除せず、Activity履歴も保持します。
 
 日付のみはTokyoの午前0時、時刻付きはOffsetまたは明示Timezoneから絶対時刻へ変換します。Date rangeは`start`を期限に使います。曖昧なTimezone／不正日付は拒否します。Task TypeはUIの並べ替えに使わず、正規化済みの値だけをSync Run metadataへ残します。最初からDoneのEntityの完了時刻は、Notionが完了日時を提供しないためLast Edited Timeを初期値とし、以後Doneのままなら維持します。
+
+## Notion Worker
+
+WorkerはWebとは別の明示起動プロセスです。起動コマンドはサービス登録・Migration・DB初期化を行いません。まず設定を確認し、Dry Runを実行します。
+
+```sh
+pnpm notion:worker --help
+pnpm notion:worker --dry-run
+```
+
+書き込みを実行する場合だけ、既存の`NOTION_SYNC_TARGET`に加えて`NOTION_WORKER_ENABLED=true`を設定します。
+
+```sh
+# 1回だけ同期して終了
+pnpm notion:worker --once
+# 明示起動中だけ定期実行。SIGINT/SIGTERMで停止
+pnpm notion:worker
+```
+
+初期値はIncremental 5分、Full Reconciliation 6時間です。`.env.example`の`NOTION_POLL_INTERVAL_MS`／`NOTION_FULL_INTERVAL_MS`で変更できます。実行をawaitしてから次回を待つため重複実行せず、停止期間分のJobを溜めません。再起動後のFull要否はDBに保存した最終成功時刻から判断します。
+
+ScopeのBaselineがない場合はFullを実行し、すべてのActivity生成を抑制します。正常終了時だけBaselineを登録します。既存同期済みEntityもこの対象です。確立後は新規ProjectのCreated、Projectの状態／期限変更、high／urgent Taskの完了をActivity化します。新たに閲覧可能になっただけの古いProjectのCreatedは生成しません。Mapping変更時はBaselineを再確立します。
+
+Entity・Activity・Baseline／Cursor・成功Runは同じTransactionに保存します。Partial／FailedではCursorを進めません。取得時刻に2分の重なりを持たせ、冪等UpsertとActivityのUnique Dedup Keyで再取得を吸収します。`enabled=false`のIntegrationは同期しません。長いRetry-AfterはDBへ記録して早期再実行を防ぎます。Lock競合は`skipped`で、障害扱いにしません。
+
+既存の`integration_cursors`を使うため追加Migrationはありません。詳細なルールと制約は[Notion自動同期](docs/architecture/notion-sync.md)を参照してください。
 
 ## 検証
 
@@ -153,7 +181,7 @@ pnpm format:check
 - `pnpm test:e2e:database`: Migration適用済みの空Databaseを`DATABASE_URL`（またはルート`.env`）に指定した場合のみ実行します。port 43101で空画面、port 43102で接続失敗時のError/503を確認します。既存データの削除、Seed、Migrationは行いません。
 - E2Eの画面キャプチャは`test-results/`へ保存します（Git対象外）。
 - Dockerの実起動は別の検証です。PGliteの成功はDocker Compose上のPostgreSQL接続成功を保証しません。
-- CIでは独立したPostgreSQL 18 Serviceの`personal_desk_ci`へDrizzle Kit Migrationを適用し、`POSTGRES_TEST_URL`を明示した`packages/database/src/postgres.test.ts`でVersion・13テーブル・Foreign Key・Index・Enum・`timestamptz`・Read Queryを検証します。FixtureはTransactionをロールバックし、その後Read Smokeと空DBのDatabase E2Eを実行します。通常の`pnpm test`はこの実DBテストをSkipし、個人用`.env`には接続しません。
+- CIでは独立したPostgreSQL 18 Serviceの`personal_desk_ci`へDrizzle Kit Migrationを適用し、`POSTGRES_TEST_URL`を明示した`packages/database/src/postgres.test.ts`でVersion・13テーブル・Foreign Key・Index・Enum・`timestamptz`・Read Queryを検証します。Notionの`postgres.test.ts`は同じServiceに専用の一時DBを作り、Session Lock・接続切断・Transaction整合性を検証後にそのDBだけを削除します。テストRoleには一時DBの作成権限が必要です。既存の空DB E2EへFixtureを残しません。通常の`pnpm test`は実DBテストをSkipし、個人用`.env`には接続しません。
 
 ## 表示状態の確認
 
@@ -178,13 +206,15 @@ pnpm format:check
 
 ```text
 apps/web/             Next.js App Router、画面、shadcn/ui Button、Data Source境界
+apps/worker/          Notion定期同期の明示起動プロセス
 packages/core/        Domain型、並べ替え、絞り込み、日時・状態判定
 packages/database/    Drizzle Schema、Migration、DB接続Factory、Read Query
 packages/i18n/        ja-JP Dictionary、表示Label、相対時刻
+packages/integrations/ Notion Collector、Normalizer、差分計画、Writer、手動CLI
 tests/e2e/            実ブラウザの受け入れテスト
-docs/                 既存の設計書（変更していません）
+docs/                 設計書と運用手順
 ```
 
-UIはWeb以外でまだ共有しないため`packages/ui`は作成していません。`apps/worker`と`packages/integrations`は実連携を追加する段階で作成できます。
+UIはWeb以外でまだ共有しないため`packages/ui`は作成していません。
 
 詳細な判断・検証結果・残課題は[IMPLEMENTATION.md](IMPLEMENTATION.md)を参照してください。仕様の責務は[docs/README.md](docs/README.md)に従います。

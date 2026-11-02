@@ -12,6 +12,7 @@ import {
   prop,
   relation,
   status,
+  time,
 } from './fixtures';
 import { object, redact } from './types';
 
@@ -93,7 +94,7 @@ describe('Notion mapping and normalization', () => {
       sourceType: ['Work'],
     });
   });
-  it('rejects foreign-source pages, empty titles, incomplete relations and archived pages', () => {
+  it('rejects invalid entities and retains validated explicit deletion signals separately', () => {
     const pages = fixturePages();
     pages.areas[0].parent = { type: 'data_source_id', data_source_id: id(999) };
     object(pages.projects[0].properties).Area = { ...relation('area', []), has_more: true };
@@ -107,7 +108,9 @@ describe('Notion mapping and normalization', () => {
       'unexpected_page_parent',
       'multiple_or_incomplete_relation',
       'empty_title',
-      'archived_page_skipped',
+    ]);
+    expect(batch.tombstones).toEqual([
+      { source: 'tasks', externalId: id(4), sourceUpdatedAt: time },
     ]);
   });
   it('requires explicit valid mapping/configuration and exact target identity', () => {

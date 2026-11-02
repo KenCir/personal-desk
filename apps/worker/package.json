@@ -1,0 +1,17 @@
+{
+  "name": "@personal-desk/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/main.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@personal-desk/integrations": "workspace:*",
+    "dotenv": "^18.0.9"
+  },
+  "devDependencies": {
+    "tsx": "^4.23.15"
+  }
+}

@@ -20,7 +20,8 @@
     "db:generate": "pnpm --filter @personal-desk/database generate",
     "db:migrate": "pnpm --filter @personal-desk/database migrate",
     "db:smoke": "pnpm --filter @personal-desk/database smoke",
-    "notion:sync": "pnpm --filter @personal-desk/integrations notion"
+    "notion:sync": "pnpm --filter @personal-desk/integrations notion",
+    "notion:worker": "pnpm --filter @personal-desk/worker start"
   },
   "devDependencies": {
     "@electric-sql/pglite": "0.5.13",

@@ -2,9 +2,10 @@ import { config as loadEnv } from 'dotenv';
 import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { createDatabase } from '@personal-desk/database';
-import { assertTarget, databaseTarget, loadMapping, NOTION_VERSION, sourceIds } from './config';
+import { databaseTarget, loadMapping, NOTION_VERSION, sourceIds } from './config';
 import { NotionCollector, inspectSchema, validateSchemas } from './collector';
-import { collectNotion, synchronize } from './sync';
+import { collectNotion } from './sync';
+import { runNotionSync } from './runtime';
 import { preflight } from './writer';
 import { array, notionId, object, redact, safeIssue, sourceKinds, NotionSyncError } from './types';
 
@@ -88,22 +89,25 @@ async function main() {
   const url = process.env.DATABASE_URL;
   const target = databaseTarget(url);
   print({ mode, target, notionVersion: NOTION_VERSION });
-  if (mode === 'apply') assertTarget(url!, process.env.NOTION_SYNC_TARGET);
+  if (mode !== '--check-db') {
+    const report = await runNotionSync({
+      url: url!,
+      target: process.env.NOTION_SYNC_TARGET,
+      token: process.env.NOTION_TOKEN ?? '',
+      ids: ids!,
+      mapping,
+      dryRun: mode === '--dry-run',
+      trigger: 'manual',
+      mode: 'full',
+    });
+    print(report);
+    if (report.status === 'failed' || report.status === 'partial') process.exitCode = 1;
+    return;
+  }
   const connection = createDatabase(url!);
   try {
     const check = await preflight(connection.db, target.database);
     print({ preflight: check });
-    if (mode === '--check-db') return;
-    if (mode === 'apply' && !check.ready)
-      throw new NotionSyncError('migration_required_before_sync');
-    const report = await synchronize({
-      db: connection.db,
-      ids: ids!,
-      collect: () => collectNotion(client!, ids!, mapping),
-      dryRun: mode === '--dry-run',
-    });
-    print(report);
-    if (report.status !== 'success' || !check.ready) process.exitCode = 1;
   } finally {
     await connection.close();
   }

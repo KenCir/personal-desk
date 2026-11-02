@@ -1,5 +1,39 @@
 # Personal Desk v0.1 実装レポート
 
+## Notion自動同期（2026-11-02）
+
+main `b7f7ab8b0876d5100436d392a9674fe3a8f6b2c2`の既存Collector／Normalizer／planSync／Writer／Database Read Layerを再利用して、任意起動のWorkerを追加しました。以下の過去記録の「Worker／Activity／自動Soft Deleteは未実装」は、この実装より前の状態です。
+
+- **明示削除のみ**: 親Data Sourceと更新時刻を検証した`archived`／`in_trash`だけをSoft Deleteします。正常なFullでも既知Entityの消失だけなら保持してWarningとします。子Entityの連鎖削除・自動復元は行いません。
+- **Baseline**: 既存同期済みEntityも初回FullでActivityを抑制し、全体成功時だけScopeのBaselineを登録します。確立後に作成された新規ProjectにはCreated Activityを生成します。古いProjectが新たに閲覧可能になっただけの場合はCreatedを生成しません。
+- **共通排他**: CLI／Workerは`runNotionSync`を通り、専用接続のProvider-wide Session Advisory LockをAPI前から保存完了まで保持します。API待ちにTransactionを開かず、保存Transaction内でも所有を検査します。接続喪失時は保存しません。
+- **Activity／整合性**: Project状態・期限、high／urgent Task完了を対象にし、Routine編集を除外します。Synthetic MilestoneとProjectの同じ事実は二重生成しません。Entity・Activity・Cursor／Baseline・成功Runを同時Commitし、Dedup Keyに確定Revisionを含めて同一Provider時刻の再完了も区別します。
+- **Worker／Health**: 5分Incremental／6時間Fullを設定可能にし、2分重ねて取得します。Partial／FailedではWatermarkを進めず、長い／最終AttemptのRetry-Afterを永続化します。disabled、Lock競合、停止、再起動、未完了Run回復に対応します。
+- **変更範囲**: `apps/worker`、Notion実装、DBのSession Lock helper、設定例、CIのPostgreSQLテスト追加、運用文書。Schema／既存Migration／UI／Read Layerは変更していません。既存`integration_cursors`を再利用し、LockfileはWorker importerの追加だけです。
+
+詳細なルール・制約は[Notion自動同期](docs/architecture/notion-sync.md)、起動手順は[README](README.md#notion-worker)に記載しました。Node 26.13.0、pnpm 12.16.1、PostgreSQL 18、既存依存関係とActionsのFull Commit SHAを維持しています。CI文書の古いNode／PostgreSQL表記を現行workflowに合わせました。
+
+### 検証環境と結果
+
+Windows上のNode 26.13.0／pnpm 12.16.1で検証しました。実DBの確認には公式EDBのPostgreSQL 18.6バイナリを作業フォルダー内へ展開し、loopbackの別ポートに新しい一時クラスタを作成しました。個人用DB、Notion実アカウント、本番Workerは使用していません。
+
+| 検証                                | 結果                                                            |
+| ----------------------------------- | --------------------------------------------------------------- |
+| Lint／Type Check／Format Check      | 成功                                                            |
+| Unit / Integration Tests            | 成功。PostgreSQL専用テストは通常RunでSkipし、下記で別途実行     |
+| PostgreSQL 18                       | 既存Schema／Read 1件、同期の複数接続・Lock喪失・原子性5件が成功 |
+| Production Build                    | DATA_SOURCE=mockで成功                                          |
+| Mock E2E                            | 4件成功                                                         |
+| Database E2E                        | 一時空DBと接続失敗の2件成功                                     |
+| Read-only DB Smoke                  | 全Query成功、一時DBが空のままであることを確認                   |
+| Frozen install／Strict peer dry run | 成功、依存バージョン変更なし                                    |
+| Audit                               | Policy Tests 6件成功、既存Baseline内8件・新規0件                |
+| CLI／Worker help                    | 起動成功、同期は実行していない                                  |
+
+Lint等との並行実行時、既存PGlite Read Queryテストが一度5秒Timeoutになりました。全テストを単独再実行して成功しています。Timeout閾値や既存テスト内容は変更していません。GitHub Actions自体はCommit／Pushを行わないため未実行で、上記はローカルでのCI相当検証です。
+
+実Notionへの書き込み、既存PostgreSQLへの変更、本番Workerの常駐設定、Commit／Pushは行っていません。
+
 ## 実DB初回同期完了（2026-11-01）
 
 ユーザーがバックアップ未取得での続行を明示したため、対象`pi:5432/personal_desk`と未適用Migrationを再確認して`0001_kind_wrecker.sql`を適用しました。既存Migrationは変更していません。

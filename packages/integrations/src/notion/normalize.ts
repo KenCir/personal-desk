@@ -212,7 +212,8 @@ export function normalizeBatch(
         if (seen.has(externalId)) throw new NotionSyncError('duplicate_page_in_collection');
         seen.add(externalId);
         if (page.in_trash === true || page.archived === true) {
-          batch.issues.push({ code: 'archived_page_skipped', source, externalId });
+          // Validate parent and source timestamp before trusting a deletion signal.
+          (batch.tombstones ??= []).push({ ...common(page, source, ids), source });
           continue;
         }
         if (source === 'areas') batch.areas.push(normalizeArea(page, refs, ids));
@@ -223,5 +224,12 @@ export function normalizeBatch(
       }
     }
   }
+  // A repeated ID can represent an inconsistent paginated snapshot. Never delete it.
+  batch.tombstones = batch.tombstones?.filter(
+    (entry) =>
+      !batch.issues.some(
+        (issue) => issue.source === entry.source && issue.externalId === entry.externalId,
+      ),
+  );
   return batch;
 }

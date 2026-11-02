@@ -45,7 +45,10 @@ export interface Issue {
   field?: string;
 }
 export class NotionSyncError extends Error {
-  constructor(readonly code: string) {
+  constructor(
+    readonly code: string,
+    readonly retryNotBefore?: string,
+  ) {
     super(code);
     this.name = 'NotionSyncError';
   }
@@ -90,6 +93,12 @@ export interface NormalizedBatch {
   tasks: NormalizedTask[];
   fetched: Record<SourceKind, number>;
   issues: Issue[];
+  tombstones?: (SourceEntity & { source: SourceKind })[];
+}
+export type SyncMode = 'full' | 'incremental';
+export interface CollectionRequest {
+  mode: SyncMode;
+  since?: string;
 }
 export type JsonObject = Record<string, unknown>;
 export function object(value: unknown): JsonObject {
@@ -111,7 +120,10 @@ export function notionId(value: unknown): string {
   return `${compact.slice(0, 8)}-${compact.slice(8, 12)}-${compact.slice(12, 16)}-${compact.slice(16, 20)}-${compact.slice(20)}`;
 }
 export function safeIssue(error: unknown): string {
-  return error instanceof NotionSyncError ? error.code : 'operation_failed';
+  if (error instanceof NotionSyncError) return error.code;
+  if (error instanceof Error && ['notion_sync_busy', 'notion_lock_lost'].includes(error.message))
+    return error.message;
+  return 'operation_failed';
 }
 
 /** Last line of defense for CLI output, including observed schema labels. */

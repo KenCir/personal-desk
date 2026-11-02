@@ -1,4 +1,5 @@
 import { NOTION_VERSION } from './config';
+import { setTimeout as delay } from 'node:timers/promises';
 import {
   array,
   NotionSyncError,
@@ -13,6 +14,7 @@ import {
   type SourceKind,
   type Issue,
   type ResolvedProperty,
+  type CollectionRequest,
 } from './types';
 
 type Transport = (url: string, init: RequestInit) => Promise<Response>;
@@ -21,6 +23,7 @@ interface ClientOptions {
   sleep?: (milliseconds: number) => Promise<void>;
   now?: () => number;
   intervalMs?: number;
+  signal?: AbortSignal;
 }
 /** Only read endpoints are exposed; POST is restricted to data source queries. */
 export class NotionCollector {
@@ -29,6 +32,7 @@ export class NotionCollector {
   private sleep: (milliseconds: number) => Promise<void>;
   private now: () => number;
   private intervalMs: number;
+  private signal?: AbortSignal;
   constructor(
     private token: string,
     options: ClientOptions = {},
@@ -37,12 +41,14 @@ export class NotionCollector {
     this.transport = options.fetch ?? fetch;
     this.sleep =
       options.sleep ??
-      ((milliseconds) => new Promise((resolve) => setTimeout(resolve, milliseconds)));
+      ((milliseconds) => delay(milliseconds, undefined, { signal: options.signal }));
     this.now = options.now ?? Date.now;
     this.intervalMs = options.intervalMs ?? 350;
+    this.signal = options.signal;
   }
   private async request(path: string, body?: JsonObject): Promise<JsonObject> {
     for (let attempt = 0; attempt < 3; attempt++) {
+      if (this.signal?.aborted) throw new NotionSyncError('notion_sync_aborted');
       await this.sleep(Math.max(0, this.nextRequestAt - this.now()));
       this.nextRequestAt = this.now() + this.intervalMs;
       let response: Response;
@@ -55,10 +61,14 @@ export class NotionCollector {
             'Content-Type': 'application/json',
           },
           body: body ? JSON.stringify(body) : undefined,
-          signal: AbortSignal.timeout(15000),
+          signal: AbortSignal.any([
+            AbortSignal.timeout(15000),
+            ...(this.signal ? [this.signal] : []),
+          ]),
           redirect: 'error',
         });
       } catch {
+        if (this.signal?.aborted) throw new NotionSyncError('notion_sync_aborted');
         if (attempt === 2) throw new NotionSyncError('notion_network_error');
         this.nextRequestAt = this.now() + 1000 * 2 ** attempt;
         continue;
@@ -79,12 +89,22 @@ export class NotionCollector {
       if (blocked) throw new NotionSyncError('notion_access_blocked');
       if (response.status !== 429 && response.status < 500)
         throw new NotionSyncError(`notion_http_${response.status}`);
-      if (attempt === 2) throw new NotionSyncError(`notion_http_${response.status}`);
       const retryAfter = response.headers.get('retry-after');
       const seconds = retryAfter === null ? NaN : Number(retryAfter);
-      const delay = Number.isFinite(seconds) && seconds >= 0 ? seconds * 1000 : 1000 * 2 ** attempt;
+      const retryDate = retryAfter === null ? NaN : Date.parse(retryAfter);
+      const delay =
+        Number.isFinite(seconds) && seconds >= 0
+          ? seconds * 1000
+          : Number.isFinite(retryDate)
+            ? Math.max(0, retryDate - this.now())
+            : 1000 * 2 ** attempt;
+      const retryAt = new Date(Math.min(8.64e15, this.now() + delay)).toISOString();
+      // Preserve even the last response's Retry-After for the next scheduled attempt.
+      if (attempt === 2) throw new NotionSyncError(`notion_http_${response.status}`, retryAt);
       // Do not retry earlier than requested; a long pause is reported for manual re-run.
-      if (delay > 60000) throw new NotionSyncError('notion_retry_later');
+      if (delay > 60000) {
+        throw new NotionSyncError('notion_retry_later', retryAt);
+      }
       this.nextRequestAt = this.now() + delay;
     }
     throw new NotionSyncError('notion_retry_exhausted');
@@ -125,8 +145,24 @@ export class NotionCollector {
     } while (cursor);
     return result;
   }
-  async getPages(id: string, properties: (ResolvedProperty | null)[]): Promise<unknown[]> {
-    const pages = await this.list(`data_sources/${notionId(id)}/query`, {});
+  async getPages(
+    id: string,
+    properties: (ResolvedProperty | null)[],
+    request?: CollectionRequest,
+  ): Promise<unknown[]> {
+    const filter = request?.since
+      ? {
+          filter: {
+            timestamp: 'last_edited_time',
+            last_edited_time: { on_or_after: request.since },
+          },
+        }
+      : {};
+    const path = `data_sources/${notionId(id)}/query`;
+    const pages = await this.list(path, filter);
+    // Automated and manual synchronization request both active and explicitly archived pages.
+    // Inspection callers can retain the active-only query by omitting the request.
+    if (request) pages.push(...(await this.list(path, { ...filter, is_archived: true })));
     const selected = new Set(properties.filter((p) => p !== null).map((p) => p.id));
     for (const value of pages) {
       const page = object(value);

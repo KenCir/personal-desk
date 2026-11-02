@@ -3,6 +3,9 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "exports": {
+    "./notion": "./src/notion/index.ts"
+  },
   "scripts": {
     "typecheck": "tsc --noEmit",
     "notion": "tsx src/notion/cli.ts"

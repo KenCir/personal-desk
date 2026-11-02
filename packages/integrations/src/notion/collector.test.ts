@@ -21,6 +21,25 @@ const options = () => ({
 });
 
 describe('read-only Notion collector', () => {
+  it('queries incremental active and archived pages with the same inclusive timestamp filter', async () => {
+    const fetch = vi.fn(async () =>
+      Response.json({ results: [], has_more: false, next_cursor: null }),
+    );
+    const client = new NotionCollector('test', { fetch, intervalMs: 0 });
+    await client.getPages('00000000-0000-4000-8000-000000000001', [], {
+      mode: 'incremental',
+      since: '2026-10-30T00:00:00Z',
+    });
+    expect(fetch).toHaveBeenCalledTimes(2);
+    const bodies = fetch.mock.calls.map((call) =>
+      JSON.parse((call as unknown as [string, RequestInit])[1].body as string),
+    );
+    expect(bodies[0].filter).toEqual({
+      timestamp: 'last_edited_time',
+      last_edited_time: { on_or_after: '2026-10-30T00:00:00Z' },
+    });
+    expect(bodies[1]).toEqual({ ...bodies[0], is_archived: true });
+  });
   it('uses pinned API version, paginates with opaque cursors and never exposes write endpoints', async () => {
     const transport = vi
       .fn()
@@ -114,6 +133,24 @@ describe('read-only Notion collector', () => {
       new NotionCollector('token', { ...options(), fetch: limited }).getDataSource(ids.areas),
     ).rejects.toThrow('notion_retry_later');
     expect(limited).toHaveBeenCalledTimes(1);
+  });
+  it('preserves the final attempt Retry-After for the next worker invocation', async () => {
+    const transport = vi
+      .fn()
+      .mockResolvedValueOnce(response({}, 429, { 'retry-after': '0' }))
+      .mockResolvedValueOnce(response({}, 429, { 'retry-after': '0' }))
+      .mockResolvedValueOnce(response({}, 429, { 'retry-after': '3600' }));
+    await expect(
+      new NotionCollector('token', {
+        fetch: transport,
+        now: () => Date.parse('2026-11-02T00:00:00Z'),
+        sleep: async () => undefined,
+      }).getDataSource(ids.areas),
+    ).rejects.toMatchObject({
+      code: 'notion_http_429',
+      retryNotBefore: '2026-11-02T01:00:00.000Z',
+    });
+    expect(transport).toHaveBeenCalledTimes(3);
   });
   it('fails on a pagination error instead of returning a misleading partial collection', async () => {
     const transport = vi
