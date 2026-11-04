@@ -8,7 +8,10 @@ coverage/
 !.env.example
 notion.mapping.json
 *.dump
+*.dump.json
 *.backup
+secrets/
+compose.prod.env
 *.tsbuildinfo
 next-env.d.ts
 .pnpm-store/

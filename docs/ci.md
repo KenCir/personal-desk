@@ -13,6 +13,16 @@ Node is pinned to **26.13.0**. pnpm is read from `package.json#packageManager` (
 
 All external actions use official release commit SHAs, with version comments. Renovate can review changes to these pins through its existing GitHub Actions manager.
 
+## Production Docker validation
+
+The independent **Docker** job builds the Web and Worker multi-stage images and the explicit maintenance target, then runs `node scripts/ci/docker.mjs`. It uses only generated disposable credentials and a test-only Notion fetch preload; no real Notion request, VPS deployment, registry push, or repository secret is used. Production source guards and API endpoints are not weakened for tests.
+
+The job validates Compose, applies migrations twice, provisions separate roles, starts Web/PostgreSQL without Worker, checks readiness/static assets and role privileges, explicitly runs fixture Worker sync twice, verifies heartbeat and signal/lock recovery, tests database outage/recovery and named-volume persistence, then backs up and restores into a second empty project. Cleanup verifies the exact project label before deleting only the run's temporary volume. Logs/results are retained for seven days; env/config/dumps are not uploaded.
+
+All actions retain full commit SHA pins. There are no additional Docker actions or deployment permissions. The existing Checks/E2E jobs remain required as before; add Docker as a required check only after its first successful hosted run, through a separate repository-settings change. Local test success is not a hosted CI result. If Docker is unavailable, the script exits nonzero and records `unavailable`, never a passing test.
+
+The Checks job also runs the production Secret Loader and health-probe Node tests. Formatting now covers Docker/CI scripts, production Compose, the workflow, and operational docs. The only dependency-category change is moving the existing locked `tsx` version into Worker runtime dependencies; no package version upgrade is needed.
+
 ## Security audit policy
 
 Run locally with `node scripts/ci/audit.mjs`; test the policy with `node --test scripts/ci/audit.test.mjs`.

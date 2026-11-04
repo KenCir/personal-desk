@@ -2,6 +2,8 @@
 
 このディレクトリには、Personal Deskの設計・仕様に関するドキュメントを配置する。
 
+Production運用: [起動・更新・Worker制御](operations/production.md)、[Backup/Restore](operations/backup-restore.md)、[実装・検証状況](operations/validation.md)。承認済みの段階計画は[Production実装計画](production-deployment-plan.md)を参照。
+
 ドキュメントは責務ごとに以下の3種類へ分離する。
 
 ## `docs/ui`

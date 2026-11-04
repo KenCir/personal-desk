@@ -9,9 +9,7 @@
   },
   "dependencies": {
     "@personal-desk/integrations": "workspace:*",
-    "dotenv": "^18.0.9"
-  },
-  "devDependencies": {
+    "dotenv": "^18.0.9",
     "tsx": "^4.23.15"
   }
 }

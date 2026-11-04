@@ -54,6 +54,8 @@ jobs:
         run: pnpm test
       - name: Audit policy tests
         run: node --test scripts/ci/audit.test.mjs
+      - name: Production secret and health probe tests
+        run: node --test scripts/docker/*.test.mjs
       - name: Production build
         run: pnpm build
       - name: Security audit against reviewed baseline
@@ -127,4 +129,28 @@ jobs:
           name: playwright-failures
           path: test-results/
           if-no-files-found: ignore
+          retention-days: 7
+
+  docker:
+    name: Docker
+    runs-on: ubuntu-26.04
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '26.13.0'
+          package-manager-cache: false
+      - name: Build images and verify isolated Compose lifecycle
+        # Only generated fixture secrets. No registry push, SSH or Notion traffic.
+        run: node scripts/ci/docker.mjs
+      - name: Upload Docker evidence
+        if: ${{ always() }}
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: docker-validation
+          path: test-results/docker/
+          if-no-files-found: warn
           retention-days: 7

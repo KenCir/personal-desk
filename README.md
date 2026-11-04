@@ -1,5 +1,7 @@
 # Personal Desk
 
+KAGOYA VPS向けProduction Docker構成は[運用手順](docs/operations/production.md)、[Backup/Restore](docs/operations/backup-restore.md)、[実装・検証状況](docs/operations/validation.md)を参照してください。`compose.prod.yaml`は開発用`compose.yaml`と混ぜず単独で使用し、Workerは明示起動します。
+
 プロジェクト、今日の予定、アクティビティ、インフラをまとめて確認する個人向けワークスペースです。v0.1は**閲覧専用**で、MockとPostgreSQLのRead Data Sourceを切り替えられます。開発時の既定はMock、Productionでは明示指定が必要です。
 
 ## 起動

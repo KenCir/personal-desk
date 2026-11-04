@@ -1,0 +1,132 @@
+# Production configuration. See docs/operations/production.md before first use.
+# Use alone: never merge with the development compose.yaml.
+name: personal-desk-prod
+
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: '10m'
+    max-file: '3'
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: personal_desk
+      POSTGRES_USER: personal_desk
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+      TZ: Asia/Tokyo
+    secrets:
+      - postgres_password
+    volumes:
+      - postgres18_data:/var/lib/postgresql
+    networks: [database]
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U personal_desk -d personal_desk']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+    stop_grace_period: 60s
+    logging: *logging
+
+  web:
+    image: personal-desk/web:${RELEASE_TAG:?Set an immutable release identifier}
+    build:
+      context: .
+      dockerfile: apps/web/Dockerfile
+    init: true
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      DATA_SOURCE: database
+      HOSTNAME: 0.0.0.0
+      PORT: '3000'
+      NEXT_TELEMETRY_DISABLED: '1'
+      DATABASE_URL_FILE: /run/secrets/web_database_url
+      TZ: Asia/Tokyo
+    secrets:
+      - web_database_url
+    ports:
+      - '127.0.0.1:${WEB_PORT:-3100}:3000'
+    networks: [database, frontend]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test:
+        - CMD
+        - node
+        - -e
+        - "fetch('http://127.0.0.1:3000/api/health/ready', {signal: AbortSignal.timeout(3000)}).then(r => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))"
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    stop_grace_period: 30s
+    logging: *logging
+
+  worker:
+    image: personal-desk/worker:${RELEASE_TAG:?Set an immutable release identifier}
+    build:
+      context: .
+      dockerfile: apps/worker/Dockerfile
+    profiles: [worker]
+    init: true
+    # Deliberate: do not restart on crash or Docker/host restart.
+    restart: 'no'
+    environment:
+      NODE_ENV: production
+      DATABASE_URL_FILE: /run/secrets/worker_database_url
+      NOTION_TOKEN_FILE: /run/secrets/notion_token
+      NOTION_WORKER_ENABLED: ${NOTION_WORKER_ENABLED:-false}
+      NOTION_SYNC_TARGET: postgres:5432/personal_desk
+      NOTION_AREAS_DATA_SOURCE_ID: ${NOTION_AREAS_DATA_SOURCE_ID:-}
+      NOTION_PROJECTS_DATA_SOURCE_ID: ${NOTION_PROJECTS_DATA_SOURCE_ID:-}
+      NOTION_TASKS_DATA_SOURCE_ID: ${NOTION_TASKS_DATA_SOURCE_ID:-}
+      NOTION_MAPPING_FILE: /app/notion.mapping.json
+      NOTION_POLL_INTERVAL_MS: '300000'
+      NOTION_FULL_INTERVAL_MS: '21600000'
+      TZ: Asia/Tokyo
+    secrets:
+      - worker_database_url
+      - notion_token
+    volumes:
+      - type: bind
+        source: ${PROD_CONFIG_DIR:-/etc/personal-desk}/notion.mapping.json
+        target: /app/notion.mapping.json
+        read_only: true
+        bind:
+          create_host_path: false
+    networks: [database, egress]
+    depends_on:
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'node', '/app/scripts/docker/worker-health.mjs']
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    stop_grace_period: 60s
+    logging: *logging
+
+networks:
+  database:
+    internal: true
+  frontend: {}
+  egress: {}
+
+volumes:
+  postgres18_data: {}
+
+secrets:
+  postgres_password:
+    file: ${PROD_SECRET_DIR:-/etc/personal-desk/secrets}/postgres_password
+  web_database_url:
+    file: ${PROD_SECRET_DIR:-/etc/personal-desk/secrets}/web_database_url
+  worker_database_url:
+    file: ${PROD_SECRET_DIR:-/etc/personal-desk/secrets}/worker_database_url
+  notion_token:
+    file: ${PROD_SECRET_DIR:-/etc/personal-desk/secrets}/notion_token

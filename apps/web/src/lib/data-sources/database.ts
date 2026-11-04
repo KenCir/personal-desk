@@ -9,11 +9,16 @@ const runtime = globalThis as typeof globalThis & {
   deskDatabase?: ReturnType<typeof createDatabase>;
 };
 export function getDatabaseDataSource(): DeskDataSource {
-  const url = databaseUrl(process.env.DATABASE_URL);
-  runtime.deskDatabase ??= createDatabase(url);
+  const database = getWebDatabase();
   return {
-    ...createReadQueries(runtime.deskDatabase.db),
+    ...createReadQueries(database.db),
     calendarStatus: 'disconnected',
     getEvents: async () => [],
   };
+}
+
+export function getWebDatabase() {
+  const url = databaseUrl(process.env.DATABASE_URL);
+  runtime.deskDatabase ??= createDatabase(url);
+  return runtime.deskDatabase;
 }
