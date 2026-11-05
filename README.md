@@ -1,5 +1,7 @@
 # Personal Desk
 
+本番は GHCR の web・worker・maintenance を同じ SHA と digest で pull します。配置ディレクトリで `node scripts/docker/operations.mjs migrate`、続いて `roles` を実行します。環境変数・初回起動・Worker 操作は[本番手順](docs/operations/production.md)、dump と隔離復元は[バックアップ手順](docs/operations/backup-restore.md)を参照してください。
+
 KAGOYA VPS向けProduction Docker構成は[運用手順](docs/operations/production.md)、[Backup/Restore](docs/operations/backup-restore.md)、[実装・検証状況](docs/operations/validation.md)を参照してください。`compose.prod.yaml`は開発用`compose.yaml`と混ぜず単独で使用し、Workerは明示起動します。
 
 プロジェクト、今日の予定、アクティビティ、インフラをまとめて確認する個人向けワークスペースです。v0.1は**閲覧専用**で、MockとPostgreSQLのRead Data Sourceを切り替えられます。開発時の既定はMock、Productionでは明示指定が必要です。

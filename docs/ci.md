@@ -1,5 +1,7 @@
 # Dependency validation CI
 
+CI 成功後の main push のみ Publish GHCR release が起動する。Ubuntu 24.04 の amd64/arm64 ネイティブ Runner ごとに Buildx のローカル BuildKit レイヤーキャッシュを使用し、Fixture による Docker ライフサイクルテスト済みの Image を stage タグで転送する。両方の成功後に同一 SHA の manifest を組み立て、platform と各 child の revision/source を検査する。成功した run の release.env が3つの digest の組である。途中失敗時は配布せず同じ run を再実行する。既存 SHA タグは検査のみ行う。各 child digest が今回試験した stage の digest と一致する場合だけ release.env を発行する。公開途中で失敗した場合は同じ run の失敗 job のみを再実行する。再ビルドによる digest 不一致は上書きせず、既存成果物を照合するか新しい commit でリリースする。
+
 `CI` runs for every pull request (including Renovate and forks), pushes to `main`, and manual dispatch. It uses `contents: read`, does not persist checkout credentials, and never uses `pull_request_target` or repository secrets. Repository rules and auto-merge are not changed by this workflow.
 
 ## Jobs and required checks

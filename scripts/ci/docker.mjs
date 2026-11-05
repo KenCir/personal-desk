@@ -23,7 +23,9 @@ const directory = mkdtempSync(join(tmpdir(), 'desk-docker-'));
 const secrets = join(directory, 'secrets');
 const envFile = join(directory, 'compose.env');
 const override = join(directory, 'fixture.json');
-const release = `test-${id}`;
+const revision = process.env.DESK_BUILD_REVISION;
+if (revision) assert.match(revision, /^[0-9a-f]{40}$/);
+const release = revision ? `sha-${revision}` : `test-${id}`;
 const artifactDir = resolve('test-results/docker');
 mkdirSync(artifactDir, { recursive: true });
 const engine = spawnSync('docker', ['version'], { encoding: 'utf8', windowsHide: true });
@@ -207,20 +209,33 @@ try {
   assert.equal(config.services.worker.environment.NOTION_WORKER_ENABLED, 'false');
   assert.equal(config.networks.database.internal, true);
   evidence.push('Compose config validated; DB unpublished; Worker opt-in');
-  dc('build', 'web', 'worker');
-  run('docker', [
-    'build',
-    '-f',
-    'apps/worker/Dockerfile',
-    '--target',
-    'maintenance',
-    '-t',
-    `personal-desk/maintenance:${release}`,
-    '.',
-  ]);
+  for (const role of ['web', 'worker', 'maintenance']) {
+    const image = `ghcr.io/kencir/personal-desk-${role}:${release}`;
+    if (role !== 'maintenance') {
+      assert.equal(config.services[role].image, image);
+      assert.equal(config.services[role].build, undefined);
+    }
+    run('docker', [
+      'buildx',
+      'build',
+      '--load',
+      '--provenance=false',
+      '--file',
+      role === 'web' ? 'apps/web/Dockerfile' : 'apps/worker/Dockerfile',
+      '--target',
+      role === 'maintenance' ? role : 'runtime',
+      '--label',
+      'org.opencontainers.image.source=https://github.com/KenCir/personal-desk',
+      '--label',
+      `org.opencontainers.image.revision=${revision ?? 'local'}`,
+      '--tag',
+      image,
+      '.',
+    ]);
+  }
   evidence.push('Web/Worker/maintenance images built');
   for (const role of ['web', 'worker', 'maintenance']) {
-    const image = `personal-desk/${role}:${release}`;
+    const image = `ghcr.io/kencir/personal-desk-${role}:${release}`;
     const [metadata] = JSON.parse(run('docker', ['image', 'inspect', image]));
     assert.equal(metadata.Config.User, 'node');
     assert.equal(run('docker', ['run', '--rm', '--entrypoint', 'id', image, '-u']), '1000');
@@ -254,6 +269,17 @@ try {
   const postgres = dc('ps', '-q', 'postgres');
   assert.equal(inspect(web).Config.User, 'node');
   assert.equal(Object.keys(inspect(postgres).HostConfig.PortBindings ?? {}).length, 0);
+  assert.equal(inspect(web).HostConfig.Memory, 512 * 1024 ** 2);
+  assert.equal(inspect(postgres).HostConfig.Memory, 768 * 1024 ** 2);
+  run('docker', [
+    'exec',
+    '-w',
+    '/app/apps/web',
+    web,
+    'node',
+    '-e',
+    "const r = require('node:module').createRequire(require.resolve('next/package.json')); r('sharp')({create:{width:1,height:1,channels:3,background:'white'}}).png().toBuffer().catch(() => process.exit(1))",
+  ]);
   const imageProbe =
     "const fs=require('fs');if(fs.existsSync('/app/.env')||fs.existsSync('/app/notion.mapping.json'))process.exit(1)";
   run('docker', [
@@ -261,7 +287,7 @@ try {
     '--rm',
     '--entrypoint',
     'node',
-    `personal-desk/web:${release}`,
+    `ghcr.io/kencir/personal-desk-web:${release}`,
     '-e',
     imageProbe,
   ]);
@@ -270,7 +296,7 @@ try {
     '--rm',
     '--entrypoint',
     'node',
-    `personal-desk/worker:${release}`,
+    `ghcr.io/kencir/personal-desk-worker:${release}`,
     '-e',
     imageProbe,
   ]);

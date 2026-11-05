@@ -8,14 +8,14 @@ Web、明示起動のNotion Worker、PostgreSQL 18を同一Compose Projectに置
 
 - VPS OS・CPU architecture、Docker Engine/Compose v2、Disk/inode/RAM、既存Project・Volume・ポート、ホスト再起動ポリシーを記録する。
 - `provision.mjs` / `operations.mjs`をホストで実行するため、運用端末にはNode.js 26.13.0が必要。これらはNode標準ライブラリのみを使い、ホストへのアプリ依存インストールや常駐Nodeサービスは不要。VPSへのNode導入は今回実施していない。
-- `3100`の空きを確認。構成はホストCaddy向けに`127.0.0.1:3100`へWebのみ公開する。DBにhost portはない。既存CaddyはこのRepositoryの操作対象外。
-- コンテナCaddyの場合はWebを既存external Networkへ接続し、固有aliasから3000番へ接続する差分をレビューする。DB/WorkerはCaddy Networkへ参加させない。Caddyコンテナ内のlocalhostはWebではない。
-- アプリ認証はない。既存VPN・認証Proxy等のアクセス制限とTLSを確認してから公開する。
-- 本番のBuild/起動試験とRestoreリハーサルが未完なら先に隔離環境で実施する。ImageはVPS architectureに合わせ、同じrelease IDを使う。既存Node 26.13.0、pnpm 12.16.1、PostgreSQL 18を維持する。
+- Web は `127.0.0.1:3100` に限定する。ホストの 3100/8443 と Docker の専用 Project 名の空きを確認する。
+- 配布先は `/home/debian/DockerService/personal-desk/`。検証された SHA から `compose.prod.yaml` を `compose.yaml` として配置し、`scripts/docker/{operations,provision}.mjs` は相対パスを保ってコピーする。合わせて env と Mapping の example を用意する。ホストには Docker CLI と Node.js 26.13.0 が必要。
+- 日次バックアップの一時保存先は `/var/backups/personal-desk/`（0700）。専用 Restic 保存先の容量・復元試験を確認する。
+- Web/Worker/DB の上限は順に 512/512/768 MiB、0.75/0.5/1 CPU。Fixture に加えて初回同期時の OOM・Swap と既存サービスの余力を確認する。
 
 ## ファイルとSecretの準備
 
-Linux shellでRepository rootから実行する例。`/etc/personal-desk`は候補であり、既存サービスと共用しない。
+Linux shellで配置ディレクトリから実行する例。`/etc/personal-desk`は候補であり、既存サービスと共用しない。
 
 1. Git外へ`compose.prod.env.example`をコピーし、`/etc/personal-desk/compose.env`としてrelease ID・配置パス・Source ID・ポートを設定する。`COMPOSE_PROFILES`や`NOTION_WORKER_ENABLED`を常設しない。
 2. 空の新規Secretディレクトリに`node scripts/docker/provision.mjs /etc/personal-desk/secrets`を実行する。DB管理/Web/Worker用に別のランダムpasswordとURLを作る。既存ファイルは上書きしない。既存DBに対して再生成をpassword rotationの代用にしない。
@@ -27,22 +27,26 @@ Node Imageのユーザーは`node`（UID 1000）。admin/web/workerのURLとNoti
 
 Secret Loaderは`*_FILE`必須、空・複数行・通常ENVとの競合を拒否する。URLは認証情報付き、host=`postgres`、port=5432、DB=`personal_desk`、query/hashなしに限定。Web Roleは`desk_web`、Workerは`desk_worker`、maintenanceは`personal_desk`。特殊文字を含むpasswordはURL-encodeする。エラーは値やファイル内容を表示しない。
 
-## Buildと初回起動
+## Release の取得と初回起動
+
+成功した Publish GHCR release の artifact から `release.env` を取得し、SHA と3つの digest を照合して配置ディレクトリに保存する。これは workflow が生成する4行の非機密ファイルで、読み込む前に内容を確認する。`docker buildx imagetools inspect ghcr.io/kencir/personal-desk-web:sha-<full SHA>` で manifest と両 architecture を確認できる。Private Package は pull 用アカウントで `docker login ghcr.io --username USER --password-stdin` に read:packages 資格情報を安全に入力する。
 
 ```sh
+cd /home/debian/DockerService/personal-desk
+export DESK_COMPOSE_FILE="$PWD/compose.yaml"
 export DESK_ENV_FILE=/etc/personal-desk/compose.env
 export DESK_PROJECT=personal-desk-prod
 export PROD_SECRET_DIR=/etc/personal-desk/secrets
-# compose.envと同一の、レビュー済みcommitの識別子を設定する。
-export RELEASE_TAG=REPLACE_WITH_REVIEWED_COMMIT
+set -a
+. ./release.env
+set +a
 dc() {
-  docker compose --env-file "$DESK_ENV_FILE" -p "$DESK_PROJECT" -f compose.prod.yaml "$@"
+  docker compose --env-file "$DESK_ENV_FILE" -p "$DESK_PROJECT" -f "$DESK_COMPOSE_FILE" "$@"
 }
 
 dc config -q
-dc build web worker
-docker build -f apps/worker/Dockerfile --target maintenance \
-  -t "personal-desk/maintenance:$RELEASE_TAG" .
+dc --profile worker pull
+docker pull "ghcr.io/kencir/personal-desk-maintenance:$RELEASE_TAG@$MAINTENANCE_DIGEST"
 dc up -d --wait postgres
 node scripts/docker/operations.mjs migrate
 node scripts/docker/operations.mjs roles
@@ -50,6 +54,8 @@ dc up -d --wait web
 dc ps -a
 curl --fail http://127.0.0.1:3100/api/health/ready
 ```
+
+Tailnet の HTTPS と 8443 への grants/ACL を確認した上で、配置作業時に `tailscale serve --bg --https=8443 http://127.0.0.1:3100` を設定する。許可端末の HTTPS 接続と非許可端末からの拒否を検証する。Funnel は無効のまま運用する。
 
 Production Composeは**単独**で使う。開発用`compose.yaml`とマージしない。通常の`up`はDB/Webだけで、Workerは作られない。Migrationは上記の管理コマンドからだけ実行し、Entry Point、DB初期化SQL、Worker起動に組み込まない。
 
@@ -93,7 +99,7 @@ profile、既定false、`restart: 'no'`の3段階で制御する。Docker/ホス
 
 1. Workerを停止し、現在のrelease、Image digest、Migration履歴、Volume名を記録する。
 2. Backupを取得し、復元可能性を確認する。必要な停止時間を確保する。
-3. 次releaseをBuildし、隔離環境の検証を通す。Migration互換性を確認し、管理操作としてmigrate→rolesを実行する。
+3. 次releaseのdigestを確認してpullし、隔離環境の検証を通す。Migration互換性を確認し、管理操作としてmigrate→rolesを実行する。
 4. Webを再作成し、Health・画面・読取を確認する。Workerはdry-run/onceを経て必要な場合だけ明示起動する。
 5. Schema互換なら前ImageへWebを戻せる。非互換なら旧Backupを別Project/Volumeへ復元し、失われる更新を確認して切替を判断する。ラズパイへの接続変更を切戻し手段にしない。
 

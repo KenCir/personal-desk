@@ -25,7 +25,15 @@ if (
   console.error('Set DESK_ENV_FILE and an allowed DESK_PROJECT explicitly.');
   process.exit(1);
 }
-const base = ['compose', '--env-file', resolve(envFile), '-p', project, '-f', 'compose.prod.yaml'];
+const base = [
+  'compose',
+  '--env-file',
+  resolve(envFile),
+  '-p',
+  project,
+  '-f',
+  process.env.DESK_COMPOSE_FILE ?? 'compose.prod.yaml',
+];
 function docker(args, options = {}) {
   const result = spawnSync('docker', args, { stdio: 'inherit', ...options });
   if (result.error || result.status !== 0) throw new Error('docker_operation_failed');
@@ -131,7 +139,7 @@ try {
       'WEB_DATABASE_URL_FILE=/run/secrets/web_database_url',
       '-e',
       'WORKER_DATABASE_URL_FILE=/run/secrets/worker_database_url',
-      `personal-desk/maintenance:${release}`,
+      `ghcr.io/kencir/personal-desk-maintenance:${release}${process.env.MAINTENANCE_DIGEST ? '@' + process.env.MAINTENANCE_DIGEST : ''}`,
       operation,
     ]);
   } else if (operation === 'backup') {

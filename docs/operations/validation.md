@@ -1,5 +1,9 @@
 # Production Docker実装・検証記録
 
+2026-11-05 GHCR 変更の検証範囲。以前の CI 成功は下記の旧構成の記録。新たな amd64/arm64 Runner では Web 起動・静的 asset・DB readiness、Worker fixture・停止、maintenance migration/roles と dump/restore を同じ上限で検査する。両 architecture の実行結果、実公開・digest と本番負荷は初回の新 Workflow 成功後に追記する。
+
+ローカルで actionlint、Compose CLI 5.7.0 による tag/digest 補間、Lint、Type Check、Format、Fixture 104件、Docker 補助テスト8件を確認した。通常の Fixture 実行では PostgreSQL を要する6件は skip。Windows/WSL の既存ツールでは Docker Engine を実行できず、今回変更した Image の amd64/arm64 起動・リソース上限・GHCR からの Pull は未検証。
+
 2026-11-04 / 基準main `b4f19c3f82c789c79d35ee852b2e1efbd5381088`。承認済み[計画](../production-deployment-plan.md)のPhase 2〜9を実装した。以下は**計画済み・実装済み・実行検証済みを区別**した記録であり、本番配置済みという意味ではない。
 
 ## Commit・Push後のCI実行検証（2026-11-04）

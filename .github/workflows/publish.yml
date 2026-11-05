@@ -1,0 +1,110 @@
+name: Publish GHCR release
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+
+permissions:
+  contents: read
+concurrency:
+  group: publish-${{ github.event.workflow_run.head_sha }}
+  cancel-in-progress: false
+
+env:
+  DESK_BUILD_REVISION: ${{ github.event.workflow_run.head_sha }}
+
+jobs:
+  native:
+    if: >-
+      github.repository == 'KenCir/personal-desk' &&
+      github.event.workflow_run.head_repository.full_name == github.repository &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.event == 'push' &&
+      github.event.workflow_run.conclusion == 'success'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            arch: amd64
+          - runner: ubuntu-24.04-arm
+            arch: arm64
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.workflow_run.head_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: '26.13.0'
+          package-manager-cache: false
+      - name: Build and exercise the three native images
+        run: |
+          test "$(git rev-parse HEAD)" = "$DESK_BUILD_REVISION"
+          node scripts/ci/docker.mjs
+      - name: Stage tested images
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+          ARCH: ${{ matrix.arch }}
+        run: |
+          echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          for role in web worker maintenance; do
+            repo="ghcr.io/kencir/personal-desk-$role"
+            image="$repo:sha-$DESK_BUILD_REVISION"
+            test "$(docker inspect --format '{{.Architecture}}' "$image")" = "$ARCH"
+            docker tag "$image" "$repo:stage-$GITHUB_RUN_ID-$ARCH"
+            docker push "$repo:stage-$GITHUB_RUN_ID-$ARCH"
+          done
+  release:
+    needs: native
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - name: Assemble and verify release
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          echo "$GHCR_TOKEN" | docker login ghcr.io -u "$GITHUB_ACTOR" --password-stdin
+          tag="sha-$DESK_BUILD_REVISION"
+          echo "RELEASE_TAG=$tag" > release.env
+          for role in web worker maintenance; do
+            repo="ghcr.io/kencir/personal-desk-$role"
+            ref="$repo:$tag"
+            declare -A staged
+            for arch in amd64 arm64; do
+              docker buildx imagetools inspect "$repo:stage-$GITHUB_RUN_ID-$arch" >stage.txt
+              staged[$arch]=$(awk '$1 == "Digest:" {print $2; exit}' stage.txt)
+              [[ "${staged[$arch]}" =~ ^sha256:[0-9a-f]{64}$ ]]
+            done
+            if ! docker buildx imagetools inspect "$ref" >inspect.txt 2>inspect.err; then
+              grep -Ei 'manifest unknown|not found' inspect.err
+              docker buildx imagetools create --annotation "index:org.opencontainers.image.revision=$DESK_BUILD_REVISION" -t "$ref" "$repo@${staged[amd64]}" "$repo@${staged[arm64]}"
+              docker buildx imagetools inspect "$ref" >inspect.txt
+            fi
+            digest=$(awk '$1 == "Digest:" {print $2; exit}' inspect.txt)
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+            docker buildx imagetools inspect --raw "$repo@$digest" > index.json
+            jq -e --arg sha "$DESK_BUILD_REVISION" '.mediaType=="application/vnd.oci.image.index.v1+json" and .annotations["org.opencontainers.image.revision"]==$sha' index.json
+            jq -e '[.manifests[].platform | [.os,.architecture]] | sort == [["linux","amd64"],["linux","arm64"]]' index.json
+            for arch in amd64 arm64; do
+              child=$(jq -r --arg a "$arch" '.manifests[] | select(.platform.architecture==$a) | .digest' index.json)
+              test "$child" = "${staged[$arch]}"
+              docker pull --platform "linux/$arch" "$repo@$child"
+              docker image inspect "$repo@$child" | jq -e --arg sha "$DESK_BUILD_REVISION" --arg arch "$arch" '.[0] | .Architecture==$arch and .Config.Labels["org.opencontainers.image.revision"]==$sha and .Config.Labels["org.opencontainers.image.source"]=="https://github.com/KenCir/personal-desk"'
+            done
+            echo "${role^^}_DIGEST=$digest" >> release.env
+          done
+          cat release.env >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-${{ github.event.workflow_run.head_sha }}
+          path: release.env

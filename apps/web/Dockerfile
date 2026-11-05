@@ -4,6 +4,7 @@ COPY . .
 RUN npm install --global "$(node -p 'require("./package.json").packageManager')" \
     && pnpm install --frozen-lockfile --strict-peer-dependencies
 ENV NEXT_TELEMETRY_DISABLED=1 DATA_SOURCE=mock DESK_STANDALONE=1
+RUN cd apps/web && node -e "const r = require('node:module').createRequire(require.resolve('next/package.json')); r('@next/swc-linux-' + process.arch + '-gnu'); r('sharp')"
 RUN mkdir -p apps/web/public && pnpm build
 
 FROM node:26.13.0-bookworm-slim AS runtime
