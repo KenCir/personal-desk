@@ -87,7 +87,21 @@ jobs:
             done
             if ! docker buildx imagetools inspect "$ref" >inspect.txt 2>inspect.err; then
               grep -Ei 'manifest unknown|not found' inspect.err
-              docker buildx imagetools create --annotation "index:org.opencontainers.image.revision=$DESK_BUILD_REVISION" -t "$ref" "$repo@${staged[amd64]}" "$repo@${staged[arm64]}"
+              : > descriptors.jsonl
+              for arch in amd64 arm64; do
+                docker buildx imagetools inspect --raw "$repo@${staged[$arch]}" > child.json
+                test "sha256:$(sha256sum child.json | cut -d' ' -f1)" = "${staged[$arch]}"
+                jq -c --arg arch "$arch" --arg digest "${staged[$arch]}" --argjson size "$(wc -c < child.json)" \
+                  '{mediaType, digest:$digest, size:$size, platform:{os:"linux", architecture:$arch}}' child.json >> descriptors.jsonl
+              done
+              jq -sc --arg sha "$DESK_BUILD_REVISION" \
+                '{schemaVersion:2, mediaType:"application/vnd.oci.image.index.v1+json", manifests:., annotations:{"org.opencontainers.image.revision":$sha}}' descriptors.jsonl > publish-index.json
+              package=${repo#ghcr.io/}
+              bearer=$(curl -fsS -u "$GITHUB_ACTOR:$GHCR_TOKEN" --get https://ghcr.io/token \
+                --data-urlencode service=ghcr.io --data-urlencode "scope=repository:$package:pull,push" | jq -er '.token')
+              echo "::add-mask::$bearer"
+              curl -fsS -X PUT -H "Authorization: Bearer $bearer" -H 'Content-Type: application/vnd.oci.image.index.v1+json' \
+                --data-binary @publish-index.json "https://ghcr.io/v2/$package/manifests/$tag"
               docker buildx imagetools inspect "$ref" >inspect.txt
             fi
             digest=$(awk '$1 == "Digest:" {print $2; exit}' inspect.txt)
