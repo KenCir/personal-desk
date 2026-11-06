@@ -19,7 +19,7 @@
     "uuid": "^14.0.3"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "0.5.13",
+    "@electric-sql/pglite": "0.5.15",
     "tsx": "^4.23.15"
   }
 }
