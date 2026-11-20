@@ -14,12 +14,12 @@
     "@personal-desk/core": "workspace:*",
     "@personal-desk/database": "workspace:*",
     "@js-temporal/polyfill": "^0.5.1",
-    "dotenv": "^18.0.9",
+    "dotenv": "^18.0.10",
     "drizzle-orm": "^0.45.4",
     "uuid": "^14.0.3"
   },
   "devDependencies": {
-    "@electric-sql/pglite": "0.5.13",
+    "@electric-sql/pglite": "0.5.16",
     "tsx": "^4.23.15"
   }
 }
